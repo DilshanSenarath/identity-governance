@@ -306,6 +306,9 @@ public class JDBCRecoveryDataStore implements UserRecoveryDataStore {
     @Override
     public UserRecoveryData load(String code, boolean skipExpiryValidation) throws IdentityRecoveryException, NotImplementedException {
 
+        if (log.isDebugEnabled()) {
+            log.debug("Loading user recovery data from DB. Skip expiry validation: " + skipExpiryValidation);
+        }
         handleRecoveryDataEventPublishing(PRE_GET_USER_RECOVERY_DATA,
                 GET_USER_RECOVERY_DATA_SCENARIO_WITH_CODE_EXPIRY_VALIDATION, null, null, code, null,
                 new UserRecoveryData(null, code, null, null));
@@ -324,6 +327,7 @@ public class JDBCRecoveryDataStore implements UserRecoveryDataStore {
             prepStmt = connection.prepareStatement(sql);
             prepStmt.setString(1, code);
 
+            log.debug("Executing DB query to load recovery data by code.");
             resultSet = prepStmt.executeQuery();
 
             if (resultSet.next()) {
@@ -338,26 +342,47 @@ public class JDBCRecoveryDataStore implements UserRecoveryDataStore {
                         Calendar.getInstance(TimeZone.getTimeZone(UTC)));
                 String recoveryFlowId = resultSet.getString(IdentityRecoveryConstants.DBConstants.RECOVERY_FLOW_ID);
 
+                if (log.isDebugEnabled()) {
+                    log.debug("Recovery data found for user the in tenant: " + user.getTenantDomain()
+                            + ", scenario: " + recoveryScenario
+                            + ", step: " + recoveryStep);
+                }
                 userRecoveryData = new UserRecoveryData(user, recoveryFlowId, code, recoveryScenario, recoveryStep,
                         timeCreated);
                 if (StringUtils.isNotBlank(resultSet.getString("REMAINING_SETS"))) {
                     userRecoveryData.setRemainingSetIds(resultSet.getString("REMAINING_SETS"));
                 }
                 long createdTimeStamp = timeCreated.getTime();
+                if (log.isDebugEnabled()) {
+                    log.debug("Checking code expiry for the user in tenant: " + user.getTenantDomain());
+                }
                 boolean isCodeExpired = isCodeExpired(user.getTenantDomain(), userRecoveryData.getRecoveryScenario(),
                         userRecoveryData.getRecoveryStep(), createdTimeStamp, userRecoveryData.getRemainingSetIds());
                 if (skipExpiryValidation) {
+                    if (log.isDebugEnabled()) {
+                        log.debug("Skipping expiry validation. Returning recovery data with code expired status: "
+                                + isCodeExpired);
+                    }
                     userRecoveryData.setCodeExpired(isCodeExpired);
                     return userRecoveryData;
                 }
                 if (isCodeExpired) {
+                    if (log.isDebugEnabled()) {
+                        log.debug("Confirmation code is expired for the user in tenant: " + user.getTenantDomain());
+                    }
                     isOperationSuccess = false;
                     description = resolveErrorCodeForExpiry(recoveryScenario);
                     throw Utils.handleClientException((IdentityRecoveryConstants.ErrorMessages) description, code);
                 }
+                if (log.isDebugEnabled()) {
+                    log.debug("Recovery data loaded successfully for user in tenant: " + user.getTenantDomain());
+                }
                 isOperationSuccess = true;
                 description = null;
                 return userRecoveryData;
+            }
+            if (log.isDebugEnabled()) {
+                log.debug("No recovery data found in DB for the provided code.");
             }
         } catch (SQLException e) {
             isOperationSuccess = false;

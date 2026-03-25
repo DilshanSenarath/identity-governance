@@ -73,14 +73,21 @@ public class ConfirmationCodeValidationExecutor implements Executor {
     @Override
     public ExecutorResponse execute(FlowExecutionContext flowExecutionContext) {
 
+        if (LOG.isDebugEnabled()) {
+            LOG.debug("Executing ConfirmationCodeValidationExecutor for flow type: "
+                    + flowExecutionContext.getFlowType());
+        }
         ExecutorResponse response = new ExecutorResponse();
         String confirmationCode = flowExecutionContext.getUserInputData().get(CONFIRMATION_CODE_INPUT);
 
         if (StringUtils.isBlank(confirmationCode)) {
+            LOG.debug("Confirmation code is not present in user input. Requesting client input.");
             return clientInputRequiredResponse(response, CONFIRMATION_CODE_INPUT);
         }
+        LOG.debug("Confirmation code received in user input. Proceeding with validation.");
         try {
             UserRecoveryData userRecoveryData = validateConfirmationCode(confirmationCode);
+            LOG.debug("Confirmation code validated successfully.");
             setupFlowUser(flowExecutionContext, userRecoveryData.getUser());
 
             flowExecutionContext.setProperty(CONFIRMATION_CODE_INPUT, confirmationCode);
@@ -88,12 +95,17 @@ public class ConfirmationCodeValidationExecutor implements Executor {
             flowExecutionContext.setProperty(NOTIFICATION_CHANNEL, userRecoveryData.getRemainingSetIds());
             if (userRecoveryData.getRecoveryScenario() != null) {
                 flowExecutionContext.setProperty(RECOVERY_SCENARIO, userRecoveryData.getRecoveryScenario().name());
+                if (LOG.isDebugEnabled()) {
+                    LOG.debug("Recovery scenario set in flow context: "
+                            + userRecoveryData.getRecoveryScenario().name());
+                }
             }
-
+            LOG.debug("Flow context properties set. ConfirmationCodeValidationExecutor completed successfully.");
             response.setResult(STATUS_COMPLETE);
         } catch (IdentityRecoveryException e) {
             if (e.getErrorCode().equals(IdentityRecoveryConstants.ErrorMessages.ERROR_CODE_INVALID_CODE
                     .getCode())) {
+                LOG.debug("Invalid confirmation code provided. Returning user error response.");
                 return userErrorResponse(response, e.getMessage());
             }
             String errorMessage = "Error while validating the confirmation code.";
@@ -160,15 +172,20 @@ public class ConfirmationCodeValidationExecutor implements Executor {
      */
     private UserRecoveryData validateConfirmationCode(String code) throws IdentityRecoveryException {
 
+        LOG.debug("Initiating confirmation code validation.");
         UserRecoveryDataStore userRecoveryDataStore = JDBCRecoveryDataStore.getInstance();
         UserRecoveryData userRecoveryData;
 
         try {
+            LOG.debug("Attempting to load recovery data using hashed confirmation code.");
             userRecoveryData = userRecoveryDataStore.load(Utils.hashCode(code));
+            LOG.debug("Recovery data loaded successfully using hashed confirmation code.");
         } catch (NoSuchAlgorithmException e) {
+            LOG.debug("Error while hashing the confirmation code.");
             throw new IdentityRecoveryServerException("Error while hashing the confirmation code", e);
         } catch (IdentityRecoveryException e) {
             // Fallback to plain code.
+            LOG.debug("Could not load recovery data using hashed code. Falling back to plain confirmation code.");
             userRecoveryData = userRecoveryDataStore.load(code);
         }
 
@@ -176,7 +193,15 @@ public class ConfirmationCodeValidationExecutor implements Executor {
         String contextTenantDomain = PrivilegedCarbonContext.getThreadLocalCarbonContext().getTenantDomain();
         String userTenantDomain = userRecoveryData.getUser().getTenantDomain();
 
+        if (LOG.isDebugEnabled()) {
+            LOG.debug("Validating tenant domain. Context tenant: " + contextTenantDomain
+                    + ", User tenant: " + userTenantDomain);
+        }
         if (!StringUtils.equals(contextTenantDomain, userTenantDomain)) {
+            if (LOG.isDebugEnabled()) {
+                LOG.debug("Tenant domain mismatch detected. Context tenant: " + contextTenantDomain
+                        + ", User tenant: " + userTenantDomain);
+            }
             throw new IdentityRecoveryClientException("Invalid tenant domain: " + userTenantDomain);
         }
         return userRecoveryData;
